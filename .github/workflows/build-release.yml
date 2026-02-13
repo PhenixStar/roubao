@@ -1,0 +1,75 @@
+name: Build Release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create dummy google-services.json
+        run: |
+          cat > app/google-services.json << 'GSEOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "dummy-project",
+              "storage_bucket": "dummy-project.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                "android_client_info": { "package_name": "com.roubao.autopilot" }
+              },
+              "api_key": [{ "current_key": "dummy-key-for-ci-build" }]
+            }],
+            "configuration_version": "1"
+          }
+          GSEOF
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(grep 'versionName' app/build.gradle.kts | head -1 | grep -oP '"\K[^"]+')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}-hardened" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Roubao ${{ steps.version.outputs.version }} (Hardened)"
+          body: |
+            Security-hardened build with 28 P0/P1 fixes:
+            - Shell command injection mitigation
+            - SSRF prevention in HttpTool
+            - Bitmap memory leak fixes
+            - OkHttp response lifecycle management
+            - HTTP 429 rate-limit handling
+            - Thread safety (@Volatile, CopyOnWriteArrayList)
+            - Token budget enforcement
+            - Coordinate validation and clamping
+
+            **Note:** Built with dummy Firebase config — crashlytics/analytics disabled.
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
