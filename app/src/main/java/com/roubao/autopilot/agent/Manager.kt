@@ -162,10 +162,12 @@ class Manager {
             "No completed subgoal."
         }
 
-        val plan = response
-            .substringAfter("### Plan")
-            .replace("###", "")
-            .trim()
+        val plan = if (response.contains("### Plan")) {
+            response.substringAfter("### Plan").replace("###", "").trim()
+        } else {
+            println("[Manager] WARNING: Response missing '### Plan' header")
+            ""
+        }
 
         return PlanResult(thought, completedSubgoal, plan)
     }

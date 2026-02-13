@@ -40,6 +40,13 @@ class VLMClient(
         private const val MAX_RETRIES = 3
         private const val RETRY_DELAY_MS = 1000L
 
+        /** Shared lightweight client for fetchModels() calls */
+        private val fetchClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(2, 1, TimeUnit.MINUTES))
+            .build()
+
         /** 规范化 URL：自动添加 https:// 前缀，移除末尾斜杠 */
         private fun normalizeUrl(url: String): String {
             var normalized = url.trim().removeSuffix("/")
@@ -61,11 +68,6 @@ class VLMClient(
                 return@withContext Result.failure(Exception("Base URL 不能为空"))
             }
 
-            val client = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build()
-
             // 清理 URL，确保正确拼接
             val cleanBaseUrl = normalizeUrl(baseUrl.removeSuffix("/chat/completions"))
 
@@ -84,7 +86,7 @@ class VLMClient(
             }
 
             try {
-                client.newCall(request).execute().use { response ->
+                fetchClient.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string() ?: ""
 
                     if (response.isSuccessful) {
@@ -167,21 +169,28 @@ class VLMClient(
                     .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = client.newCall(request).execute()
-                val responseBody = response.body?.string() ?: ""
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string() ?: ""
 
-                if (response.isSuccessful) {
-                    val json = JSONObject(responseBody)
-                    val choices = json.getJSONArray("choices")
-                    if (choices.length() > 0) {
-                        val message = choices.getJSONObject(0).getJSONObject("message")
-                        val responseContent = message.getString("content")
-                        return@withContext Result.success(responseContent)
+                    if (response.isSuccessful) {
+                        val json = JSONObject(responseBody)
+                        val choices = json.getJSONArray("choices")
+                        if (choices.length() > 0) {
+                            val message = choices.getJSONObject(0).getJSONObject("message")
+                            val responseContent = message.getString("content")
+                            return@withContext Result.success(responseContent)
+                        } else {
+                            lastException = Exception("No response from model")
+                        }
+                    } else if (response.code == 429) {
+                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                        val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
+                        println("[VLMClient] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        lastException = Exception("Rate limited (HTTP 429)")
+                        delay(waitMs)
                     } else {
-                        lastException = Exception("No response from model")
+                        lastException = Exception("API error: ${response.code} - $responseBody")
                     }
-                } else {
-                    lastException = Exception("API error: ${response.code} - $responseBody")
                 }
             } catch (e: UnknownHostException) {
                 // DNS 解析失败，重试
@@ -242,21 +251,28 @@ class VLMClient(
                     .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = client.newCall(request).execute()
-                val responseBody = response.body?.string() ?: ""
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string() ?: ""
 
-                if (response.isSuccessful) {
-                    val json = JSONObject(responseBody)
-                    val choices = json.getJSONArray("choices")
-                    if (choices.length() > 0) {
-                        val message = choices.getJSONObject(0).getJSONObject("message")
-                        val responseContent = message.getString("content")
-                        return@withContext Result.success(responseContent)
+                    if (response.isSuccessful) {
+                        val json = JSONObject(responseBody)
+                        val choices = json.getJSONArray("choices")
+                        if (choices.length() > 0) {
+                            val message = choices.getJSONObject(0).getJSONObject("message")
+                            val responseContent = message.getString("content")
+                            return@withContext Result.success(responseContent)
+                        } else {
+                            lastException = Exception("No response from model")
+                        }
+                    } else if (response.code == 429) {
+                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                        val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
+                        println("[VLMClient] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        lastException = Exception("Rate limited (HTTP 429)")
+                        delay(waitMs)
                     } else {
-                        lastException = Exception("No response from model")
+                        lastException = Exception("API error: ${response.code} - $responseBody")
                     }
-                } else {
-                    lastException = Exception("API error: ${response.code} - $responseBody")
                 }
             } catch (e: UnknownHostException) {
                 println("[VLMClient] DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
@@ -335,11 +351,12 @@ object VLMConfigs {
         model = "qwen-vl-max"
     )
 
-    // Claude (Anthropic)
+    // Claude via OpenAI-compatible proxy (e.g., OpenRouter)
+    // NOTE: Does NOT work with Anthropic's native API (api.anthropic.com)
     fun claude(apiKey: String) = VLMClient(
         apiKey = apiKey,
-        baseUrl = "https://api.anthropic.com/v1",
-        model = "claude-3-5-sonnet-20241022"
+        baseUrl = "https://openrouter.ai/api/v1",  // Use proxy, not native API
+        model = "anthropic/claude-3.5-sonnet"
     )
 
     // 自定义 (vLLM / Ollama / LocalAI)

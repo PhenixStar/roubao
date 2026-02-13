@@ -132,37 +132,38 @@ For each function call, return the thinking process in <thinking> </thinking> ta
                     .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                val response = client.newCall(request).execute()
-                val responseBody = response.body?.string() ?: ""
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string() ?: ""
 
-                if (response.isSuccessful) {
-                    val json = JSONObject(responseBody)
-                    val choices = json.getJSONArray("choices")
-                    if (choices.length() > 0) {
-                        val message = choices.getJSONObject(0).getJSONObject("message")
-                        val content = message.getString("content")
+                    if (response.isSuccessful) {
+                        val json = JSONObject(responseBody)
+                        val choices = json.getJSONArray("choices")
+                        if (choices.length() > 0) {
+                            val message = choices.getJSONObject(0).getJSONObject("message")
+                            val content = message.getString("content")
 
-                        println("[MAIUIClient] Raw response: $content")
+                            println("[MAIUIClient] Raw response: $content")
 
-                        // 解析响应
-                        val parsed = parseResponse(content)
+                            // 解析响应
+                            val parsed = parseResponse(content)
 
-                        // 保存到历史
-                        historyImages.add(currentImageBase64)
-                        historyResponses.add(content)
+                            // 保存到历史
+                            historyImages.add(currentImageBase64)
+                            historyResponses.add(content)
 
-                        // 限制历史数量
-                        while (historyImages.size > historyN) {
-                            historyImages.removeAt(0)
-                            historyResponses.removeAt(0)
+                            // 限制历史数量
+                            while (historyImages.size > historyN) {
+                                historyImages.removeAt(0)
+                                historyResponses.removeAt(0)
+                            }
+
+                            return@withContext Result.success(parsed)
+                        } else {
+                            lastException = Exception("No response from model")
                         }
-
-                        return@withContext Result.success(parsed)
                     } else {
-                        lastException = Exception("No response from model")
+                        lastException = Exception("API error: ${response.code} - $responseBody")
                     }
-                } else {
-                    lastException = Exception("API error: ${response.code} - $responseBody")
                 }
             } catch (e: Exception) {
                 println("[MAIUIClient] Error on attempt $attempt: ${e.message}")
@@ -379,12 +380,12 @@ data class MAIUIAction(
      */
     fun toScreenCoordinates(screenWidth: Int, screenHeight: Int): MAIUIAction {
         return copy(
-            x = x?.let { it * screenWidth },
-            y = y?.let { it * screenHeight },
-            startX = startX?.let { it * screenWidth },
-            startY = startY?.let { it * screenHeight },
-            endX = endX?.let { it * screenWidth },
-            endY = endY?.let { it * screenHeight }
+            x = x?.let { (it * screenWidth).coerceIn(0f, (screenWidth - 1).toFloat()) },
+            y = y?.let { (it * screenHeight).coerceIn(0f, (screenHeight - 1).toFloat()) },
+            startX = startX?.let { (it * screenWidth).coerceIn(0f, (screenWidth - 1).toFloat()) },
+            startY = startY?.let { (it * screenHeight).coerceIn(0f, (screenHeight - 1).toFloat()) },
+            endX = endX?.let { (it * screenWidth).coerceIn(0f, (screenWidth - 1).toFloat()) },
+            endY = endY?.let { (it * screenHeight).coerceIn(0f, (screenHeight - 1).toFloat()) }
         )
     }
 }

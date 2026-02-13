@@ -132,45 +132,52 @@ class GUIOwlClient(
                     .build()
 
                 println("[$TAG] 请求: instruction=$instruction")
-                val response = client.newCall(request).execute()
-                val responseBody = response.body?.string() ?: ""
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string() ?: ""
 
-                if (response.isSuccessful) {
-                    val json = JSONObject(responseBody)
+                    if (response.isSuccessful) {
+                        val json = JSONObject(responseBody)
 
-                    // 更新 session_id
-                    val newSessionId = json.optString("session_id", "")
-                    if (newSessionId.isNotEmpty()) {
-                        sessionId = newSessionId
-                    }
+                        // 更新 session_id
+                        val newSessionId = json.optString("session_id", "")
+                        if (newSessionId.isNotEmpty()) {
+                            sessionId = newSessionId
+                        }
 
-                    // 解析 output
-                    val outputArray = json.optJSONArray("output")
-                    if (outputArray != null && outputArray.length() > 0) {
-                        val output = outputArray.getJSONObject(0)
-                        val contentArr = output.optJSONArray("content")
+                        // 解析 output
+                        val outputArray = json.optJSONArray("output")
+                        if (outputArray != null && outputArray.length() > 0) {
+                            val output = outputArray.getJSONObject(0)
+                            val contentArr = output.optJSONArray("content")
 
-                        if (contentArr != null && contentArr.length() > 0) {
-                            val content = contentArr.getJSONObject(0)
-                            val data = content.optJSONObject("data")
+                            if (contentArr != null && contentArr.length() > 0) {
+                                val content = contentArr.getJSONObject(0)
+                                val data = content.optJSONObject("data")
 
-                            if (data != null) {
-                                val result = GUIOwlResponse(
-                                    thought = data.optString("Thought", ""),
-                                    operation = data.optString("Operation", ""),
-                                    explanation = data.optString("Explanation", ""),
-                                    sessionId = sessionId,
-                                    rawResponse = responseBody
-                                )
-                                println("[$TAG] 响应: operation=${result.operation}")
-                                return@withContext Result.success(result)
+                                if (data != null) {
+                                    val result = GUIOwlResponse(
+                                        thought = data.optString("Thought", ""),
+                                        operation = data.optString("Operation", ""),
+                                        explanation = data.optString("Explanation", ""),
+                                        sessionId = sessionId,
+                                        rawResponse = responseBody
+                                    )
+                                    println("[$TAG] 响应: operation=${result.operation}")
+                                    return@withContext Result.success(result)
+                                }
                             }
                         }
-                    }
 
-                    lastException = Exception("Invalid response format: $responseBody")
-                } else {
-                    lastException = Exception("API error: ${response.code} - $responseBody")
+                        lastException = Exception("Invalid response format: $responseBody")
+                    } else if (response.code == 429) {
+                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                        val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
+                        println("[$TAG] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        lastException = Exception("Rate limited (HTTP 429)")
+                        delay(waitMs)
+                    } else {
+                        lastException = Exception("API error: ${response.code} - $responseBody")
+                    }
                 }
             } catch (e: Exception) {
                 println("[$TAG] 请求失败 (attempt $attempt): ${e.message}")

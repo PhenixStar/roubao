@@ -39,6 +39,7 @@ class ConversationMemory {
     fun addUserMessage(text: String, image: Bitmap? = null) {
         val imageBase64 = image?.let { bitmapToBase64(it) }
         messages.add(Message(role = "user", textContent = text, imageBase64 = imageBase64))
+        trimIfNeeded()
     }
 
     /**
@@ -46,6 +47,7 @@ class ConversationMemory {
      */
     fun addAssistantMessage(text: String) {
         messages.add(Message(role = "assistant", textContent = text))
+        trimIfNeeded()
     }
 
     /**
@@ -71,10 +73,32 @@ class ConversationMemory {
     }
 
     /**
+     * Evict oldest non-system messages when count exceeds MAX_NON_SYSTEM_MESSAGES.
+     */
+    private fun trimIfNeeded() {
+        val systemCount = messages.count { it.role == "system" }
+        while (messages.size - systemCount > MAX_NON_SYSTEM_MESSAGES) {
+            val idx = messages.indexOfFirst { it.role != "system" }
+            if (idx >= 0) messages.removeAt(idx) else break
+        }
+    }
+
+    /**
+     * Prune oldest non-system messages until estimated token count is under budget.
+     */
+    private fun trimToTokenBudget(maxTokens: Int) {
+        while (estimateTokens() > maxTokens) {
+            val idx = messages.indexOfFirst { it.role != "system" }
+            if (idx >= 0) messages.removeAt(idx) else break
+        }
+    }
+
+    /**
      * 构建 OpenAI 兼容的 messages JSON
      * @param includeImages 是否包含图片（最后一条用户消息的图片）
      */
     fun toMessagesJson(includeImages: Boolean = true): JSONArray {
+        trimToTokenBudget(DEFAULT_TOKEN_BUDGET)
         val jsonArray = JSONArray()
 
         for ((index, msg) in messages.withIndex()) {
@@ -151,6 +175,9 @@ class ConversationMemory {
     }
 
     companion object {
+        private const val MAX_NON_SYSTEM_MESSAGES = 40
+        private const val DEFAULT_TOKEN_BUDGET = 100_000
+
         /**
          * 创建带系统提示的记忆
          */

@@ -33,7 +33,9 @@ class DeviceController(private val context: Context? = null) {
         private const val SCREENSHOT_PATH = "/data/local/tmp/autopilot_screen.png"
     }
 
+    @Volatile
     private var shellService: IShellService? = null
+    @Volatile
     private var serviceBound = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val clipboardManager: ClipboardManager? by lazy {
@@ -143,16 +145,32 @@ class DeviceController(private val context: Context? = null) {
      * 执行 shell 命令 (本地，无权限)
      */
     private fun execLocal(command: String): String {
+        var process: Process? = null
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            // Drain error stream in background to prevent buffer fill hang
+            val errorDrainer = Thread {
+                try {
+                    process.errorStream.bufferedReader().readText()
+                } catch (_: Exception) { }
+            }.apply { isDaemon = true; start() }
+
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val output = reader.readText()
-            process.waitFor()
             reader.close()
+
+            val completed = process.waitFor(10, TimeUnit.SECONDS)
+            if (!completed) {
+                println("[DeviceController] WARNING: execLocal timed out after 10s, destroying process")
+                process.destroyForcibly()
+            }
+            errorDrainer.join(1000)
             output
         } catch (e: Exception) {
             e.printStackTrace()
             ""
+        } finally {
+            process?.destroy()
         }
     }
 
@@ -161,9 +179,16 @@ class DeviceController(private val context: Context? = null) {
      */
     private fun exec(command: String): String {
         return try {
-            shellService?.exec(command) ?: execLocal(command)
+            val service = shellService
+            if (service != null) {
+                service.exec(command)
+            } else {
+                println("[DeviceController] WARNING: Shizuku unavailable, falling back to local shell (reduced privileges)")
+                execLocal(command)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
+            println("[DeviceController] WARNING: Shizuku unavailable, falling back to local shell (reduced privileges)")
             execLocal(command)
         }
     }
@@ -269,7 +294,12 @@ class DeviceController(private val context: Context? = null) {
         }
 
         // 方法2: 使用 ADB Keyboard 广播 (备选，需要安装 ADBKeyboard)
-        val escaped = text.replace("\"", "\\\"")
+        // Escape shell metacharacters to prevent injection in double-quoted string
+        val escaped = text
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\$", "\\$")
+            .replace("`", "\\`")
         val adbKeyboardResult = exec("am broadcast -a ADB_INPUT_TEXT --es msg \"$escaped\"")
         println("[DeviceController] ADBKeyboard 广播结果: $adbKeyboardResult")
 
@@ -279,8 +309,10 @@ class DeviceController(private val context: Context? = null) {
         }
 
         // 方法3: 使用 cmd input text (Android 12+ 可能支持 UTF-8)
+        // Use single-quote escaping to prevent shell injection
         println("[DeviceController] 尝试 cmd input text...")
-        exec("cmd input text '$text'")
+        val singleQuoteEscaped = text.replace("'", "'\\''")
+        exec("cmd input text '$singleQuoteEscaped'")
     }
 
     /**
@@ -292,10 +324,26 @@ class DeviceController(private val context: Context? = null) {
                 char == ' ' -> exec("input text %s")
                 char == '\n' -> exec("input keyevent 66")
                 char.isLetterOrDigit() && char.code <= 127 -> exec("input text $char")
-                char in "-.,!?@'/:;()" -> exec("input text \"$char\"")
+                char in "-.,!?@'/:;()" -> {
+                    // Escape shell metacharacters in double-quoted context
+                    val safeChar = when (char) {
+                        '$' -> "\\$"
+                        '`' -> "\\`"
+                        '\\' -> "\\\\"
+                        '"' -> "\\\""
+                        else -> "$char"
+                    }
+                    exec("input text \"$safeChar\"")
+                }
                 else -> {
                     // 非 ASCII 字符使用广播
-                    exec("am broadcast -a ADB_INPUT_TEXT --es msg \"$char\"")
+                    // Escape shell metacharacters for double-quoted string
+                    val safeChar = "$char"
+                        .replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                        .replace("\$", "\\$")
+                        .replace("`", "\\`")
+                    exec("am broadcast -a ADB_INPUT_TEXT --es msg \"$safeChar\"")
                 }
             }
         }
@@ -364,17 +412,29 @@ class DeviceController(private val context: Context? = null) {
             }
 
             // 如果无法直接读取，通过 shell cat 读取二进制数据
-            println("[DeviceController] Cannot read directly, trying shell cat...")
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
-            val bytes = process.inputStream.readBytes()
-            process.waitFor()
-
-            if (bytes.isNotEmpty()) {
-                println("[DeviceController] Read ${bytes.size} bytes via shell")
-                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (bitmap != null) {
-                    return@withContext ScreenshotResult(bitmap)
+            // Only attempt su -c if root mode is available
+            if (getShizukuPrivilegeLevel() == ShizukuPrivilegeLevel.ROOT) {
+                println("[DeviceController] Cannot read directly, trying su -c cat (root available)...")
+                var suProcess: Process? = null
+                try {
+                    suProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
+                    val bytes = suProcess.inputStream.readBytes()
+                    val completed = suProcess.waitFor(5, TimeUnit.SECONDS)
+                    if (!completed) {
+                        println("[DeviceController] WARNING: su -c cat timed out, destroying process")
+                        suProcess.destroyForcibly()
+                    } else if (bytes.isNotEmpty()) {
+                        println("[DeviceController] Read ${bytes.size} bytes via shell")
+                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bitmap != null) {
+                            return@withContext ScreenshotResult(bitmap)
+                        }
+                    }
+                } finally {
+                    suProcess?.destroy()
                 }
+            } else {
+                println("[DeviceController] Cannot read directly, root not available for su -c fallback")
             }
 
             println("[DeviceController] Screenshot file empty or not accessible, returning fallback")
@@ -418,18 +478,30 @@ class DeviceController(private val context: Context? = null) {
             }
 
             // 如果无法直接读取，通过 shell cat 读取二进制数据
-            println("[DeviceController] Cannot read directly, trying shell cat...")
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
-            val bytes = process.inputStream.readBytes()
-            process.waitFor()
-
-            if (bytes.isNotEmpty()) {
-                println("[DeviceController] Read ${bytes.size} bytes via shell")
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // Only attempt su -c if root mode is available
+            if (getShizukuPrivilegeLevel() == ShizukuPrivilegeLevel.ROOT) {
+                println("[DeviceController] Cannot read directly, trying su -c cat (root available)...")
+                var suProcess: Process? = null
+                try {
+                    suProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
+                    val bytes = suProcess.inputStream.readBytes()
+                    val completed = suProcess.waitFor(5, TimeUnit.SECONDS)
+                    if (!completed) {
+                        println("[DeviceController] WARNING: su -c cat timed out, destroying process")
+                        suProcess.destroyForcibly()
+                    } else if (bytes.isNotEmpty()) {
+                        println("[DeviceController] Read ${bytes.size} bytes via shell")
+                        return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
+                } finally {
+                    suProcess?.destroy()
+                }
             } else {
-                println("[DeviceController] Screenshot file empty or not accessible")
-                null
+                println("[DeviceController] Cannot read directly, root not available for su -c fallback")
             }
+
+            println("[DeviceController] Screenshot file empty or not accessible")
+            null
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -447,7 +519,16 @@ class DeviceController(private val context: Context? = null) {
             val (w, h) = match.destructured
             Pair(w.toInt(), h.toInt())
         } else {
-            Pair(1080, 2400)
+            // Try DisplayMetrics as secondary source before hardcoded fallback
+            val ctx = context
+            if (ctx != null) {
+                val dm = ctx.resources.displayMetrics
+                println("[DeviceController] WARNING: wm size parse failed, using DisplayMetrics (${dm.widthPixels}x${dm.heightPixels})")
+                Pair(dm.widthPixels, dm.heightPixels)
+            } else {
+                println("[DeviceController] WARNING: wm size parse failed, using hardcoded 1080x2400 fallback")
+                Pair(1080, 2400)
+            }
         }
 
         // 检测屏幕方向
@@ -525,9 +606,29 @@ class DeviceController(private val context: Context? = null) {
             }
         }
 
+        // Validate package name to prevent command injection
+        val packageNamePattern = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
+        if (!packageNamePattern.matches(finalPackage)) {
+            println("[DeviceController] ERROR: Invalid package name rejected: $finalPackage")
+            return
+        }
+
         // 使用 monkey 命令启动应用 (最可靠)
         val result = exec("monkey -p $finalPackage -c android.intent.category.LAUNCHER 1 2>/dev/null")
         println("[DeviceController] openApp: $appNameOrPackage -> $finalPackage, result: $result")
+    }
+
+    /**
+     * Escape shell metacharacters for safe use inside double-quoted strings.
+     * Prevents $(), ``, and \ injection.
+     */
+    private fun escapeShellDoubleQuoted(value: String): String {
+        return value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\$", "\\$")
+            .replace("`", "\\`")
+            .replace("!", "\\!")
     }
 
     /**
@@ -537,7 +638,8 @@ class DeviceController(private val context: Context? = null) {
         val cmd = buildString {
             append("am start -a $action")
             if (data != null) {
-                append(" -d \"$data\"")
+                val safeData = escapeShellDoubleQuoted(data)
+                append(" -d \"$safeData\"")
             }
         }
         exec(cmd)
@@ -547,6 +649,7 @@ class DeviceController(private val context: Context? = null) {
      * 打开 DeepLink
      */
     fun openDeepLink(uri: String) {
-        exec("am start -a android.intent.action.VIEW -d \"$uri\"")
+        val safeUri = escapeShellDoubleQuoted(uri)
+        exec("am start -a android.intent.action.VIEW -d \"$safeUri\"")
     }
 }

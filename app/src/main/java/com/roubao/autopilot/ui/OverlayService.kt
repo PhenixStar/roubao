@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.roubao.autopilot.MainActivity
 import com.roubao.autopilot.R
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 七彩悬浮窗服务 - 显示当前执行步骤
@@ -39,15 +40,15 @@ class OverlayService : Service() {
     private var animator: ValueAnimator? = null
 
     companion object {
-        private var instance: OverlayService? = null
-        private var stopCallback: (() -> Unit)? = null
-        private var continueCallback: (() -> Unit)? = null
-        private var confirmCallback: ((Boolean) -> Unit)? = null  // 敏感操作确认回调
-        private var isTakeOverMode = false
-        private var isConfirmMode = false  // 敏感操作确认模式
+        @Volatile private var instance: OverlayService? = null
+        @Volatile private var stopCallback: (() -> Unit)? = null
+        @Volatile private var continueCallback: (() -> Unit)? = null
+        @Volatile private var confirmCallback: ((Boolean) -> Unit)? = null  // 敏感操作确认回调
+        @Volatile private var isTakeOverMode = false
+        @Volatile private var isConfirmMode = false  // 敏感操作确认模式
 
-        // 等待 instance 回调队列
-        private val pendingCallbacks = mutableListOf<() -> Unit>()
+        // 等待 instance 回调队列 -- thread-safe list
+        private val pendingCallbacks = CopyOnWriteArrayList<() -> Unit>()
 
         fun show(context: Context, text: String, onStop: (() -> Unit)? = null) {
             stopCallback = onStop
@@ -84,6 +85,11 @@ class OverlayService : Service() {
         fun setVisible(visible: Boolean) {
             instance?.overlayView?.post {
                 instance?.overlayView?.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+                if (visible) {
+                    instance?.animator?.resume()
+                } else {
+                    instance?.animator?.pause()
+                }
             }
         }
 

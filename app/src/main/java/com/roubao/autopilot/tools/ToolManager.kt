@@ -3,6 +3,7 @@ package com.roubao.autopilot.tools
 import android.content.Context
 import com.roubao.autopilot.controller.AppScanner
 import com.roubao.autopilot.controller.DeviceController
+import com.roubao.autopilot.data.SettingsManager
 
 /**
  * 工具管理器
@@ -39,7 +40,7 @@ class ToolManager private constructor(
         openAppTool = OpenAppTool(deviceController, appScanner)
         clipboardTool = ClipboardTool(context)
         deepLinkTool = DeepLinkTool(deviceController)
-        shellTool = ShellTool(deviceController)
+        shellTool = ShellTool(deviceController, SettingsManager(context))
         httpTool = HttpTool()
 
         // 注册到全局 Registry

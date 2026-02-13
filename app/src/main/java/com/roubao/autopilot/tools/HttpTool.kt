@@ -7,6 +7,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.URL
 
 /**
@@ -18,6 +19,12 @@ import java.net.URL
  * - 查询数据
  */
 class HttpTool : Tool {
+
+    companion object {
+        /** Max response body size: 1 MB */
+        private const val MAX_RESPONSE_SIZE = 1 * 1024 * 1024
+        private val ALLOWED_SCHEMES = setOf("http", "https")
+    }
 
     override val name = "http_request"
     override val displayName = "HTTP 请求"
@@ -71,6 +78,30 @@ class HttpTool : Tool {
 
         try {
             val url = URL(urlStr)
+
+            // --- SSRF prevention: validate scheme ---
+            val scheme = url.protocol?.lowercase()
+            if (scheme !in ALLOWED_SCHEMES) {
+                return@withContext ToolResult.Error(
+                    "不允许的 URL 协议: $scheme (仅支持 http/https)"
+                )
+            }
+
+            // --- SSRF prevention: reject private/loopback IPs ---
+            val host = url.host
+                ?: return@withContext ToolResult.Error("URL 缺少主机名")
+            val resolved = InetAddress.getByName(host)
+            if (resolved.isLoopbackAddress ||
+                resolved.isSiteLocalAddress ||
+                resolved.isLinkLocalAddress ||
+                resolved.isAnyLocalAddress
+            ) {
+                return@withContext ToolResult.Error(
+                    "请求被拒绝: 目标地址 ($host -> ${resolved.hostAddress}) " +
+                        "属于内部/回环/链路本地网络"
+                )
+            }
+
             val connection = url.openConnection() as HttpURLConnection
 
             connection.requestMethod = method
@@ -106,7 +137,24 @@ class HttpTool : Tool {
             }
 
             val response = BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                reader.readText()
+                val buffer = CharArray(8192)
+                val sb = StringBuilder()
+                var totalRead = 0
+                var truncated = false
+                while (true) {
+                    val read = reader.read(buffer)
+                    if (read == -1) break
+                    val remaining = MAX_RESPONSE_SIZE - totalRead
+                    if (read > remaining) {
+                        sb.append(buffer, 0, remaining)
+                        truncated = true
+                        break
+                    }
+                    sb.append(buffer, 0, read)
+                    totalRead += read
+                }
+                if (truncated) sb.append("\n... [truncated at 1MB]")
+                sb.toString()
             }
 
             connection.disconnect()

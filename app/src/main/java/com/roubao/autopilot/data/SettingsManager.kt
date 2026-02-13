@@ -114,6 +114,11 @@ data class AppSettings(
  */
 class SettingsManager(context: Context) {
 
+    /** Indicates whether encrypted storage is available. False means API keys are stored in plain text. */
+    @Volatile
+    var isEncryptionAvailable: Boolean = true
+        private set
+
     // 普通设置存储
     private val prefs: SharedPreferences =
         context.getSharedPreferences("baozi_settings", Context.MODE_PRIVATE)
@@ -133,8 +138,13 @@ class SettingsManager(context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // 加密失败时回退到普通存储（不应该发生）
-            android.util.Log.e("SettingsManager", "Failed to create encrypted prefs", e)
+            // 加密失败时回退到普通存储 -- security downgrade
+            isEncryptionAvailable = false
+            android.util.Log.w(
+                "SettingsManager",
+                "WARNING: Encrypted storage unavailable, API keys stored in plain text. Device: ${android.os.Build.MODEL}",
+                e
+            )
             prefs
         }
     }

@@ -117,19 +117,24 @@ class ShellTool(
             }
         }
 
-        // 检查白名单（可选，如果需要更严格的控制可以启用）
-        // val isAllowed = ALLOWED_PREFIXES.any { lowerCmd.startsWith(it.lowercase()) }
-        // if (!isAllowed) {
-        //     return "安全限制：命令不在允许列表中"
-        // }
+        // 检查白名单（default-deny：只允许已知安全的命令前缀）
+        val isAllowed = ALLOWED_PREFIXES.any { lowerCmd.startsWith(it.lowercase()) }
+        if (!isAllowed) {
+            return "安全限制：命令不在允许列表中 (Command not in allowed list)"
+        }
 
         return null
     }
 
     /**
      * 执行命令
-     * 注意：这里需要扩展 DeviceController 或使用反射
-     * 暂时使用简化实现
+     *
+     * 设计说明: 此方法通过 Runtime.getRuntime().exec() 直接在当前进程的
+     * shell 中执行命令, 不经过 Shizuku / DeviceController. 这是有意为之:
+     * ShellTool 面向非特权命令 (由 ALLOWED_PREFIXES 白名单约束), 不需要
+     * ADB 级别的权限.
+     * TODO: 如需 ADB 级别权限的命令, 应改为通过 DeviceController 路由,
+     *       但需先将其 exec() 接口设为 public 或新增公开方法.
      */
     private fun executeCommand(command: String): String {
         return try {
