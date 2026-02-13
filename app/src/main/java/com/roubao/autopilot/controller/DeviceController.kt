@@ -10,8 +10,9 @@ import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import com.roubao.autopilot.App
 import com.roubao.autopilot.IShellService
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import com.roubao.autopilot.service.ShellService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -27,7 +28,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 设备控制器 - 通过 Shizuku UserService 执行 shell 命令
  */
-class DeviceController(private val context: Context? = null) {
+class DeviceController(private val context: Context? = null) : KoinComponent {
 
     companion object {
         // 使用 /data/local/tmp，shell 用户有权限访问
@@ -595,7 +596,7 @@ class DeviceController(private val context: Context? = null) {
             finalPackage = packageMap[lowerName]!!
         } else {
             // 使用 AppScanner 搜索应用
-            val appScanner = App.getInstance().appScanner
+            val appScanner: AppScanner by inject()
             val searchResults = appScanner.searchApps(appNameOrPackage, topK = 1)
             if (searchResults.isNotEmpty()) {
                 finalPackage = searchResults[0].app.packageName

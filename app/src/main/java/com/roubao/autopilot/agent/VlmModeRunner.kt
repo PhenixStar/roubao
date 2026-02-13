@@ -53,6 +53,8 @@ class VlmModeRunner(
         }
         updateState { copy(isRunning = true, currentStep = 0, instruction = instruction) }
 
+        var consecutiveVlmFailures = 0
+
         try {
             for (step in 0 until maxSteps) {
                 var screenshot: Bitmap? = null
@@ -84,7 +86,24 @@ class VlmModeRunner(
                     val response = client.predict(instruction, screenshot)
 
                     if (response.isFailure) {
+                        consecutiveVlmFailures++
                         log("GUI-Owl 调用失败: ${response.exceptionOrNull()?.message}")
+                        val strategy = VlmErrorRecovery.getRecoveryStrategy(consecutiveVlmFailures)
+                        if (strategy == null) {
+                            log("GUI-Owl repeatedly failed ($consecutiveVlmFailures times), giving up")
+                            OverlayService.update("VLM 多次失败，已停止")
+                            delay(1500)
+                            OverlayService.hide(context)
+                            updateState { copy(isRunning = false) }
+                            bringAppToFront()
+                            return AgentResult(false, "VLM repeatedly failed")
+                        }
+                        if (strategy == VlmErrorRecovery.RecoveryStrategy.WAIT_AND_RETRY) {
+                            log("VLM failure #$consecutiveVlmFailures, waiting 5s before retry")
+                            delay(5000)
+                        } else {
+                            log("VLM failure #$consecutiveVlmFailures, retrying...")
+                        }
                         continue
                     }
 
@@ -96,9 +115,24 @@ class VlmModeRunner(
                     // 3. 解析操作指令
                     val parsedAction = client.parseOperation(result.operation)
                     if (parsedAction == null) {
+                        consecutiveVlmFailures++
                         log("无法解析操作: ${result.operation}")
+                        val strategy = VlmErrorRecovery.getRecoveryStrategy(consecutiveVlmFailures)
+                        if (strategy == null) {
+                            log("GUI-Owl parse repeatedly failed, giving up")
+                            OverlayService.update("VLM 多次失败，已停止")
+                            delay(1500)
+                            OverlayService.hide(context)
+                            updateState { copy(isRunning = false) }
+                            bringAppToFront()
+                            return AgentResult(false, "VLM repeatedly failed")
+                        }
+                        if (strategy == VlmErrorRecovery.RecoveryStrategy.WAIT_AND_RETRY) {
+                            delay(5000)
+                        }
                         continue
                     }
+                    consecutiveVlmFailures = 0  // Reset on success
 
                     // 记录执行步骤
                     updateState {
@@ -178,6 +212,8 @@ class VlmModeRunner(
         }
         updateState { copy(isRunning = true, currentStep = 0, instruction = instruction) }
 
+        var consecutiveVlmFailures = 0
+
         try {
             for (step in 0 until maxSteps) {
                 var screenshot: Bitmap? = null
@@ -209,7 +245,24 @@ class VlmModeRunner(
                     val response = client.predict(instruction, screenshot)
 
                     if (response.isFailure) {
+                        consecutiveVlmFailures++
                         log("MAI-UI 调用失败: ${response.exceptionOrNull()?.message}")
+                        val strategy = VlmErrorRecovery.getRecoveryStrategy(consecutiveVlmFailures)
+                        if (strategy == null) {
+                            log("MAI-UI repeatedly failed ($consecutiveVlmFailures times), giving up")
+                            OverlayService.update("VLM 多次失败，已停止")
+                            delay(1500)
+                            OverlayService.hide(context)
+                            updateState { copy(isRunning = false) }
+                            bringAppToFront()
+                            return AgentResult(false, "VLM repeatedly failed")
+                        }
+                        if (strategy == VlmErrorRecovery.RecoveryStrategy.WAIT_AND_RETRY) {
+                            log("VLM failure #$consecutiveVlmFailures, waiting 5s before retry")
+                            delay(5000)
+                        } else {
+                            log("VLM failure #$consecutiveVlmFailures, retrying...")
+                        }
                         continue
                     }
 
@@ -218,9 +271,24 @@ class VlmModeRunner(
 
                     val action = result.action
                     if (action == null) {
+                        consecutiveVlmFailures++
                         log("无法解析动作")
+                        val strategy = VlmErrorRecovery.getRecoveryStrategy(consecutiveVlmFailures)
+                        if (strategy == null) {
+                            log("MAI-UI parse repeatedly failed, giving up")
+                            OverlayService.update("VLM 多次失败，已停止")
+                            delay(1500)
+                            OverlayService.hide(context)
+                            updateState { copy(isRunning = false) }
+                            bringAppToFront()
+                            return AgentResult(false, "VLM repeatedly failed")
+                        }
+                        if (strategy == VlmErrorRecovery.RecoveryStrategy.WAIT_AND_RETRY) {
+                            delay(5000)
+                        }
                         continue
                     }
+                    consecutiveVlmFailures = 0  // Reset on success
 
                     log("动作: ${action.type}")
 

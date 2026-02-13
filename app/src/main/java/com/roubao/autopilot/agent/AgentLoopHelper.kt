@@ -85,3 +85,31 @@ data class AgentResult(
     val success: Boolean,
     val message: String
 )
+
+/**
+ * VLM error recovery strategy.
+ * After consecutive failures, progressively simplify the approach.
+ */
+object VlmErrorRecovery {
+    /** Max consecutive VLM failures before giving up */
+    const val MAX_CONSECUTIVE_FAILURES = 5
+
+    /**
+     * Returns a recovery action based on the failure count.
+     * @return null if should give up, otherwise a recovery hint
+     */
+    fun getRecoveryStrategy(consecutiveFailures: Int): RecoveryStrategy? {
+        return when (consecutiveFailures) {
+            1, 2 -> RecoveryStrategy.RETRY_NORMAL
+            3 -> RecoveryStrategy.RETRY_SIMPLIFIED
+            4 -> RecoveryStrategy.WAIT_AND_RETRY
+            else -> null  // Give up
+        }
+    }
+
+    enum class RecoveryStrategy {
+        RETRY_NORMAL,
+        RETRY_SIMPLIFIED,
+        WAIT_AND_RETRY
+    }
+}

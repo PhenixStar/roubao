@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 import rikka.shizuku.Shizuku
 import android.util.Log
+import org.koin.android.ext.android.inject
 
 private const val TAG = "MainActivity"
 
@@ -55,7 +56,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector,
 class MainActivity : ComponentActivity() {
 
     private lateinit var deviceController: DeviceController
-    private lateinit var settingsManager: SettingsManager
+    private val settingsManager: SettingsManager by inject()
     private lateinit var executionRepository: ExecutionRepository
 
     private val mobileAgent = mutableStateOf<MobileAgent?>(null)
@@ -112,7 +113,6 @@ class MainActivity : ComponentActivity() {
 
         deviceController = DeviceController(this)
         deviceController.setCacheDir(cacheDir)
-        settingsManager = App.getInstance().settingsManager
         executionRepository = ExecutionRepository(this)
 
         // 加载执行记录

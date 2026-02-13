@@ -2,8 +2,9 @@ package com.roubao.autopilot.agent
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.roubao.autopilot.App
 import com.roubao.autopilot.controller.AppScanner
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import com.roubao.autopilot.controller.DeviceController
 import com.roubao.autopilot.data.ExecutionStep
 import com.roubao.autopilot.skills.SkillManager
@@ -39,10 +40,10 @@ class MobileAgent(
     private val context: Context,
     private val guiOwlClient: GUIOwlClient? = null,  // GUI-Owl 专用客户端
     private val maiuiClient: MAIUIClient? = null     // MAI-UI 专用客户端
-) {
+) : KoinComponent {
     private val useGUIOwlMode: Boolean = guiOwlClient != null
     private val useMAIUIMode: Boolean = maiuiClient != null
-    private val appScanner: AppScanner = App.getInstance().appScanner
+    private val appScanner: AppScanner by inject()
     private val manager = Manager()
     private val executor = Executor()
     private val reflector = ActionReflector()
@@ -132,6 +133,8 @@ class MobileAgent(
         }
         updateState { copy(isRunning = true, currentStep = 0, instruction = instruction) }
 
+        var consecutiveVlmFailures = 0
+
         try {
             for (step in 0 until maxSteps) {
                 var screenshot: Bitmap? = null
@@ -154,7 +157,35 @@ class MobileAgent(
                     if (managerResult != null) return managerResult
 
                     // 3. Executor 决定动作
-                    val output = runExecutorPhase(vlm, infoPool, screenshot) ?: continue
+                    val output = runExecutorPhase(vlm, infoPool, screenshot)
+                    if (output == null) {
+                        // VLM failure or parse failure - apply recovery
+                        consecutiveVlmFailures++
+                        val strategy = VlmErrorRecovery.getRecoveryStrategy(consecutiveVlmFailures)
+                        if (strategy == null) {
+                            log("VLM repeatedly failed ($consecutiveVlmFailures times), giving up")
+                            OverlayService.update("VLM 多次失败，已停止")
+                            delay(1500)
+                            OverlayService.hide(context)
+                            updateState { copy(isRunning = false) }
+                            bringAppToFront()
+                            return AgentResult(false, "VLM repeatedly failed")
+                        }
+                        when (strategy) {
+                            VlmErrorRecovery.RecoveryStrategy.RETRY_NORMAL -> {
+                                log("VLM failure #$consecutiveVlmFailures, retrying...")
+                            }
+                            VlmErrorRecovery.RecoveryStrategy.RETRY_SIMPLIFIED -> {
+                                log("VLM failure #$consecutiveVlmFailures, retrying with simplified approach")
+                            }
+                            VlmErrorRecovery.RecoveryStrategy.WAIT_AND_RETRY -> {
+                                log("VLM failure #$consecutiveVlmFailures, waiting 5s before retry")
+                                delay(5000)
+                            }
+                        }
+                        continue
+                    }
+                    consecutiveVlmFailures = 0  // Reset on success
                     val (executorResult, action) = output
 
                     // 4. 敏感操作确认

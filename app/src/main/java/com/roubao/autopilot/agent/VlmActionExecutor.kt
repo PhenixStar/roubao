@@ -1,8 +1,8 @@
 package com.roubao.autopilot.agent
 
 import com.roubao.autopilot.controller.DeviceController
-import com.roubao.autopilot.vlm.GUIOwlClient
 import com.roubao.autopilot.vlm.MAIUIAction
+import com.roubao.autopilot.vlm.ParsedAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -22,7 +22,7 @@ class VlmActionExecutor(
      * 执行 GUI-Owl 解析的动作
      */
     suspend fun executeGUIOwlAction(
-        action: GUIOwlClient.ParsedAction,
+        action: ParsedAction,
         screenWidth: Int,
         screenHeight: Int
     ) = withContext(Dispatchers.IO) {

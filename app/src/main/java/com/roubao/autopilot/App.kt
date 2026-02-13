@@ -5,9 +5,13 @@ import android.content.pm.PackageManager
 import com.roubao.autopilot.controller.AppScanner
 import com.roubao.autopilot.controller.DeviceController
 import com.roubao.autopilot.data.SettingsManager
+import com.roubao.autopilot.di.appModule
 import com.roubao.autopilot.skills.SkillManager
 import com.roubao.autopilot.tools.ToolManager
 import com.roubao.autopilot.utils.CrashHandler
+import org.koin.android.ext.android.inject
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.startKoin
 import rikka.shizuku.Shizuku
 import timber.log.Timber
 
@@ -15,10 +19,10 @@ class App : Application() {
 
     lateinit var deviceController: DeviceController
         private set
-    lateinit var appScanner: AppScanner
-        private set
-    lateinit var settingsManager: SettingsManager
-        private set
+
+    // Koin 注入的单例
+    val settingsManager: SettingsManager by inject()
+    val appScanner: AppScanner by inject()
 
     override fun onCreate() {
         super.onCreate()
@@ -32,8 +36,11 @@ class App : Application() {
         // 初始化崩溃捕获（本地日志）
         CrashHandler.getInstance().init(this)
 
-        // 初始化设置管理器（全局唯一实例）
-        settingsManager = SettingsManager(this)
+        // 初始化 Koin 依赖注入
+        startKoin {
+            androidContext(this@App)
+            modules(appModule)
+        }
 
         // 初始化 Sentry（根据用户设置决定是否启用）
         // 用户需在 AndroidManifest.xml 或此处设置自己的 DSN 以启用云端上报
@@ -57,9 +64,6 @@ class App : Application() {
         // 初始化设备控制器
         deviceController = DeviceController(this)
         deviceController.setCacheDir(cacheDir)
-
-        // 初始化应用扫描器
-        appScanner = AppScanner(this)
 
         // 初始化 Tools 层
         val toolManager = ToolManager.init(this, deviceController, appScanner, settingsManager)

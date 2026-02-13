@@ -1,21 +1,15 @@
 package com.roubao.autopilot.vlm
 
 import android.graphics.Bitmap
-import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import timber.log.Timber
-import java.net.UnknownHostException
-import java.util.concurrent.TimeUnit
 
 /**
  * VLM (Vision Language Model) API 客户端
@@ -25,37 +19,20 @@ class VLMClient(
     private val apiKey: String,
     baseUrl: String = "https://api.openai.com/v1",
     private val model: String = "gpt-4-vision-preview"
-) {
+) : BaseVlmClient() {
+
     // 规范化 URL：自动添加 https:// 前缀，移除末尾斜杠
     private val baseUrl: String = normalizeUrl(baseUrl)
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(90, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .connectionPool(ConnectionPool(5, 1, TimeUnit.MINUTES))
-        .build()
+    private val client = createHttpClient()
 
     companion object {
-        private const val MAX_RETRIES = 3
-        private const val RETRY_DELAY_MS = 1000L
-
         /** Shared lightweight client for fetchModels() calls */
-        private val fetchClient = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .connectionPool(ConnectionPool(2, 1, TimeUnit.MINUTES))
-            .build()
-
-        /** 规范化 URL：自动添加 https:// 前缀，移除末尾斜杠 */
-        private fun normalizeUrl(url: String): String {
-            var normalized = url.trim().removeSuffix("/")
-            if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
-                normalized = "https://$normalized"
-            }
-            return normalized
-        }
+        private val fetchClient = createHttpClient(
+            connectTimeout = 10,
+            readTimeout = 10,
+            maxIdleConnections = 2
+        )
 
         /**
          * 从 API 获取可用模型列表
@@ -121,106 +98,43 @@ class VLMClient(
         prompt: String,
         images: List<Bitmap> = emptyList()
     ): Result<String> = withContext(Dispatchers.IO) {
-        var lastException: Exception? = null
-
         // 预先编码图片 (避免重试时重复编码)
         val encodedImages = images.map { bitmapToBase64Url(it) }
 
-        for (attempt in 1..MAX_RETRIES) {
-            try {
-                val content = JSONArray().apply {
+        withRetry { attempt ->
+            val content = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", prompt)
+                })
+                encodedImages.forEach { imageUrl ->
                     put(JSONObject().apply {
-                        put("type", "text")
-                        put("text", prompt)
-                    })
-                    encodedImages.forEach { imageUrl ->
-                        put(JSONObject().apply {
-                            put("type", "image_url")
-                            put("image_url", JSONObject().apply {
-                                put("url", imageUrl)
-                            })
+                        put("type", "image_url")
+                        put("image_url", JSONObject().apply {
+                            put("url", imageUrl)
                         })
-                    }
-                }
-
-                val messages = JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", content)
                     })
                 }
-
-                val requestBody = JSONObject().apply {
-                    put("model", model)
-                    put("messages", messages)
-                    put("max_tokens", 4096)
-                    put("temperature", 0.0)
-                    put("top_p", 0.85)
-                    put("frequency_penalty", 0.2)  // 减少重复输出
-                }
-
-                val request = Request.Builder()
-                    .url("$baseUrl/chat/completions")
-                    .apply {
-                        if (apiKey.isNotBlank()) {
-                            addHeader("Authorization", "Bearer $apiKey")
-                        }
-                    }
-                    .addHeader("Content-Type", "application/json")
-                    .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string() ?: ""
-
-                    if (response.isSuccessful) {
-                        val json = JSONObject(responseBody)
-                        val choices = json.getJSONArray("choices")
-                        if (choices.length() > 0) {
-                            val message = choices.getJSONObject(0).getJSONObject("message")
-                            val responseContent = message.getString("content")
-                            return@withContext Result.success(responseContent)
-                        } else {
-                            lastException = Exception("No response from model")
-                        }
-                    } else if (response.code == 429) {
-                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
-                        val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
-                        Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
-                        lastException = Exception("Rate limited (HTTP 429)")
-                        delay(waitMs)
-                    } else {
-                        lastException = Exception("API error: ${response.code} - $responseBody")
-                    }
-                }
-            } catch (e: UnknownHostException) {
-                // DNS 解析失败，重试
-                Timber.w("DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: java.net.SocketTimeoutException) {
-                // 超时，重试
-                Timber.w("请求超时，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: java.io.IOException) {
-                // IO 错误，重试
-                Timber.w("IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: Exception) {
-                // 其他错误，不重试
-                return@withContext Result.failure(e)
             }
-        }
 
-        Result.failure(lastException ?: Exception("Unknown error"))
+            val messages = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", content)
+                })
+            }
+
+            val requestBody = JSONObject().apply {
+                put("model", model)
+                put("messages", messages)
+                put("max_tokens", 4096)
+                put("temperature", 0.0)
+                put("top_p", 0.85)
+                put("frequency_penalty", 0.2)  // 减少重复输出
+            }
+
+            executeChatRequest(requestBody, attempt)
+        }
     }
 
     /**
@@ -230,140 +144,57 @@ class VLMClient(
     suspend fun predictWithContext(
         messagesJson: JSONArray
     ): Result<String> = withContext(Dispatchers.IO) {
-        var lastException: Exception? = null
+        withRetry { attempt ->
+            val requestBody = JSONObject().apply {
+                put("model", model)
+                put("messages", messagesJson)
+                put("max_tokens", 4096)
+                put("temperature", 0.0)
+            }
 
-        for (attempt in 1..MAX_RETRIES) {
-            try {
-                val requestBody = JSONObject().apply {
-                    put("model", model)
-                    put("messages", messagesJson)
-                    put("max_tokens", 4096)
-                    put("temperature", 0.0)
-                }
+            executeChatRequest(requestBody, attempt)
+        }
+    }
 
-                val request = Request.Builder()
-                    .url("$baseUrl/chat/completions")
-                    .apply {
-                        if (apiKey.isNotBlank()) {
-                            addHeader("Authorization", "Bearer $apiKey")
-                        }
-                    }
-                    .addHeader("Content-Type", "application/json")
-                    .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
+    /**
+     * 执行 chat/completions 请求并解析响应
+     * 处理 429 限流等待和标准 OpenAI 响应格式
+     */
+    private suspend fun executeChatRequest(
+        requestBody: JSONObject,
+        attempt: Int
+    ): Result<String> {
+        val request = Request.Builder()
+            .url("$baseUrl/chat/completions")
+            .apply {
+                if (apiKey.isNotBlank()) {
+                    addHeader("Authorization", "Bearer $apiKey")
+                }
+            }
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+            .build()
 
-                client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string() ?: ""
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: ""
 
-                    if (response.isSuccessful) {
-                        val json = JSONObject(responseBody)
-                        val choices = json.getJSONArray("choices")
-                        if (choices.length() > 0) {
-                            val message = choices.getJSONObject(0).getJSONObject("message")
-                            val responseContent = message.getString("content")
-                            return@withContext Result.success(responseContent)
-                        } else {
-                            lastException = Exception("No response from model")
-                        }
-                    } else if (response.code == 429) {
-                        val retryAfter = response.header("Retry-After")?.toLongOrNull()
-                        val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
-                        Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
-                        lastException = Exception("Rate limited (HTTP 429)")
-                        delay(waitMs)
-                    } else {
-                        lastException = Exception("API error: ${response.code} - $responseBody")
-                    }
+            if (response.isSuccessful) {
+                val json = JSONObject(responseBody)
+                val choices = json.getJSONArray("choices")
+                return if (choices.length() > 0) {
+                    val message = choices.getJSONObject(0).getJSONObject("message")
+                    Result.success(message.getString("content"))
+                } else {
+                    Result.failure(Exception("No response from model"))
                 }
-            } catch (e: UnknownHostException) {
-                Timber.w("DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: java.net.SocketTimeoutException) {
-                Timber.w("请求超时，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: java.io.IOException) {
-                Timber.w("IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
-                lastException = e
-                if (attempt < MAX_RETRIES) {
-                    delay(RETRY_DELAY_MS * attempt)
-                }
-            } catch (e: Exception) {
-                return@withContext Result.failure(e)
+            } else if (response.code == 429) {
+                val waitMs = calculateRateLimitDelay(response.header("Retry-After"), attempt)
+                Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                delay(waitMs)
+                return Result.failure(Exception("Rate limited (HTTP 429)"))
+            } else {
+                return Result.failure(Exception("API error: ${response.code} - $responseBody"))
             }
         }
-
-        Result.failure(lastException ?: Exception("Unknown error"))
     }
-
-    /**
-     * Bitmap 转 Base64 URL (只压缩质量，不压缩分辨率)
-     * 保持原始分辨率以确保坐标准确
-     */
-    private fun bitmapToBase64Url(bitmap: Bitmap): String {
-        val outputStream = ByteArrayOutputStream()
-        // 使用 JPEG 格式，质量 70%，保持原始分辨率
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
-        val bytes = outputStream.toByteArray()
-        Timber.d("图片压缩: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
-        val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        return "data:image/jpeg;base64,$base64"
-    }
-
-    /**
-     * 调整图片大小
-     */
-    private fun resizeBitmap(bitmap: Bitmap, maxWidth: Int, maxHeight: Int): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-
-        if (width <= maxWidth && height <= maxHeight) {
-            return bitmap
-        }
-
-        val ratio = minOf(maxWidth.toFloat() / width, maxHeight.toFloat() / height)
-        val newWidth = (width * ratio).toInt()
-        val newHeight = (height * ratio).toInt()
-
-        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-    }
-}
-
-/**
- * 常用 VLM 配置
- */
-object VLMConfigs {
-    // OpenAI GPT-4V
-    fun gpt4v(apiKey: String) = VLMClient(
-        apiKey = apiKey,
-        baseUrl = "https://api.openai.com/v1",
-        model = "gpt-4-vision-preview"
-    )
-
-    // Qwen-VL (阿里云)
-    fun qwenVL(apiKey: String) = VLMClient(
-        apiKey = apiKey,
-        baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model = "qwen-vl-max"
-    )
-
-    // Claude via OpenAI-compatible proxy (e.g., OpenRouter)
-    // NOTE: Does NOT work with Anthropic's native API (api.anthropic.com)
-    fun claude(apiKey: String) = VLMClient(
-        apiKey = apiKey,
-        baseUrl = "https://openrouter.ai/api/v1",  // Use proxy, not native API
-        model = "anthropic/claude-3.5-sonnet"
-    )
-
-    // 自定义 (vLLM / Ollama / LocalAI)
-    fun custom(apiKey: String, baseUrl: String, model: String) = VLMClient(
-        apiKey = apiKey,
-        baseUrl = baseUrl,
-        model = model
-    )
 }
