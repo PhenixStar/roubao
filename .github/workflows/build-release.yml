@@ -21,31 +21,27 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Create dummy google-services.json
-        run: |
-          cat > app/google-services.json << 'GSEOF'
-          {
-            "project_info": {
-              "project_number": "000000000000",
-              "project_id": "dummy-project",
-              "storage_bucket": "dummy-project.appspot.com"
-            },
-            "client": [{
-              "client_info": {
-                "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
-                "android_client_info": { "package_name": "com.roubao.autopilot" }
-              },
-              "api_key": [{ "current_key": "dummy-key-for-ci-build" }]
-            }],
-            "configuration_version": "1"
-          }
-          GSEOF
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --no-daemon
+
+      - name: Sign APK
+        run: |
+          # Generate a debug keystore for CI builds
+          keytool -genkeypair -v -keystore debug.keystore \
+            -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Debug,OU=Debug,O=Debug,L=Debug,S=Debug,C=US"
+          # Sign the APK
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore debug.keystore -storepass android -keypass android \
+            app/build/outputs/apk/release/app-release-unsigned.apk androiddebugkey
+          # Align the signed APK
+          ${ANDROID_HOME}/build-tools/34.0.0/zipalign -v 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            app/build/outputs/apk/release/app-release-signed.apk
 
       - name: Get version info
         id: version
@@ -60,7 +56,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "Roubao ${{ steps.version.outputs.version }} (Hardened)"
           body: |
-            Security-hardened build with 28 P0/P1 fixes:
+            Security-hardened build:
             - Shell command injection mitigation
             - SSRF prevention in HttpTool
             - Bitmap memory leak fixes
@@ -69,7 +65,8 @@ jobs:
             - Thread safety (@Volatile, CopyOnWriteArrayList)
             - Token budget enforcement
             - Coordinate validation and clamping
-
-            **Note:** Built with dummy Firebase config — crashlytics/analytics disabled.
-          files: app/build/outputs/apk/release/*.apk
+            - Replaced Firebase Crashlytics with Sentry
+            - Added Timber for structured logging
+            - APK signed with debug keystore
+          files: app/build/outputs/apk/release/app-release-signed.apk
           generate_release_notes: true

@@ -1,5 +1,7 @@
 package com.roubao.autopilot.agent
 
+import timber.log.Timber
+
 /**
  * Manager Agent - 负责规划和进度管理
  */
@@ -165,7 +167,7 @@ class Manager {
         val plan = if (response.contains("### Plan")) {
             response.substringAfter("### Plan").replace("###", "").trim()
         } else {
-            println("[Manager] WARNING: Response missing '### Plan' header")
+            Timber.w("Response missing '### Plan' header")
             ""
         }
 

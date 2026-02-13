@@ -13,6 +13,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import timber.log.Timber
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
@@ -185,7 +186,7 @@ class VLMClient(
                     } else if (response.code == 429) {
                         val retryAfter = response.header("Retry-After")?.toLongOrNull()
                         val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
-                        println("[VLMClient] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
                         lastException = Exception("Rate limited (HTTP 429)")
                         delay(waitMs)
                     } else {
@@ -194,21 +195,21 @@ class VLMClient(
                 }
             } catch (e: UnknownHostException) {
                 // DNS 解析失败，重试
-                println("[VLMClient] DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
                 }
             } catch (e: java.net.SocketTimeoutException) {
                 // 超时，重试
-                println("[VLMClient] 请求超时，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("请求超时，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
                 }
             } catch (e: java.io.IOException) {
                 // IO 错误，重试
-                println("[VLMClient] IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
@@ -267,7 +268,7 @@ class VLMClient(
                     } else if (response.code == 429) {
                         val retryAfter = response.header("Retry-After")?.toLongOrNull()
                         val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
-                        println("[VLMClient] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
                         lastException = Exception("Rate limited (HTTP 429)")
                         delay(waitMs)
                     } else {
@@ -275,19 +276,19 @@ class VLMClient(
                     }
                 }
             } catch (e: UnknownHostException) {
-                println("[VLMClient] DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("DNS 解析失败，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
                 }
             } catch (e: java.net.SocketTimeoutException) {
-                println("[VLMClient] 请求超时，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("请求超时，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
                 }
             } catch (e: java.io.IOException) {
-                println("[VLMClient] IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
+                Timber.w("IO 错误: ${e.message}，重试 $attempt/$MAX_RETRIES...")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
@@ -309,7 +310,7 @@ class VLMClient(
         // 使用 JPEG 格式，质量 70%，保持原始分辨率
         bitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
         val bytes = outputStream.toByteArray()
-        println("[VLMClient] 图片压缩: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
+        Timber.d("图片压缩: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         return "data:image/jpeg;base64,$base64"
     }

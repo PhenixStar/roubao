@@ -4,6 +4,7 @@ import android.content.Context
 import com.roubao.autopilot.controller.AppScanner
 import com.roubao.autopilot.controller.DeviceController
 import com.roubao.autopilot.data.SettingsManager
+import timber.log.Timber
 
 /**
  * 工具管理器
@@ -52,7 +53,7 @@ class ToolManager private constructor(
         ToolRegistry.register(shellTool)
         ToolRegistry.register(httpTool)
 
-        println("[ToolManager] 已初始化 ${ToolRegistry.getAll().size} 个工具")
+        Timber.d("已初始化 ${ToolRegistry.getAll().size} 个工具")
     }
 
     /**

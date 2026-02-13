@@ -4,6 +4,7 @@ import android.content.Context
 import com.roubao.autopilot.controller.AppScanner
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 import java.io.IOException
 
 /**
@@ -32,11 +33,11 @@ class SkillRegistry private constructor(
     fun refreshInstalledApps() {
         val apps = appScanner.getApps()
         installedPackages = apps.map { it.packageName }.toSet()
-        println("[SkillRegistry] 已缓存 ${installedPackages.size} 个已安装应用")
+        Timber.d("已缓存 ${installedPackages.size} 个已安装应用")
 
         // 调试：检查美团相关的应用
         val meituanApps = installedPackages.filter { it.contains("meituan") || it.contains("dianping") }
-        println("[SkillRegistry] 美团相关应用: $meituanApps")
+        Timber.d("美团相关应用: $meituanApps")
 
         // 检查小美的 DeepLink 是否可用（间接检测安装状态）
         try {
@@ -47,16 +48,16 @@ class SkillRegistry private constructor(
             val resolveInfo = pm.resolveActivity(intent, 0)
             if (resolveInfo != null) {
                 val pkgName = resolveInfo.activityInfo.packageName
-                println("[SkillRegistry] 小美 DeepLink 可用，包名: $pkgName")
+                Timber.d("小美 DeepLink 可用，包名: $pkgName")
                 if (!installedPackages.contains(pkgName)) {
                     installedPackages = installedPackages + pkgName
-                    println("[SkillRegistry] 添加 $pkgName 到已安装列表")
+                    Timber.d("添加 $pkgName 到已安装列表")
                 }
             } else {
-                println("[SkillRegistry] 小美 DeepLink 不可用")
+                Timber.d("小美 DeepLink 不可用")
             }
         } catch (e: Exception) {
-            println("[SkillRegistry] 检查小美失败: ${e.message}")
+            Timber.w("检查小美失败: ${e.message}")
         }
     }
 
@@ -75,7 +76,7 @@ class SkillRegistry private constructor(
             val jsonString = context.assets.open(filename).bufferedReader().use { it.readText() }
             return loadFromJson(jsonString)
         } catch (e: IOException) {
-            println("[SkillRegistry] 无法加载 $filename: ${e.message}")
+            Timber.e("无法加载 $filename: ${e.message}")
             return 0
         }
     }
@@ -93,9 +94,9 @@ class SkillRegistry private constructor(
                 register(Skill(config))
                 loadedCount++
             }
-            println("[SkillRegistry] 已加载 $loadedCount 个 Skills")
+            Timber.d("已加载 $loadedCount 个 Skills")
         } catch (e: Exception) {
-            println("[SkillRegistry] JSON 解析错误: ${e.message}")
+            Timber.e("JSON 解析错误: ${e.message}")
             e.printStackTrace()
         }
         return loadedCount
@@ -195,7 +196,7 @@ class SkillRegistry private constructor(
         val category = skill.config.category
         categoryIndex.getOrPut(category) { mutableListOf() }.add(skill)
 
-        println("[SkillRegistry] 注册 Skill: ${skill.config.id} (${skill.config.relatedApps.size} 关联应用)")
+        Timber.d("注册 Skill: ${skill.config.id} (${skill.config.relatedApps.size} 关联应用)")
     }
 
     /**

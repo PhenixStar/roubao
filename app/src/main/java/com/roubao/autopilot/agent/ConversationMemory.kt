@@ -4,7 +4,9 @@ import android.graphics.Bitmap
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 对话记忆管理 - 保存完整对话历史，图片用完即删
@@ -15,7 +17,7 @@ import java.io.ByteArrayOutputStream
  */
 class ConversationMemory {
 
-    private val messages = mutableListOf<Message>()
+    private val messages = CopyOnWriteArrayList<Message>()
 
     /**
      * 消息类型
@@ -23,7 +25,7 @@ class ConversationMemory {
     data class Message(
         val role: String,  // "system", "user", "assistant"
         val textContent: String,
-        var imageBase64: String? = null  // 图片用完后置为 null
+        @Volatile var imageBase64: String? = null  // 图片用完后置为 null
     )
 
     /**
@@ -58,7 +60,7 @@ class ConversationMemory {
         for (i in messages.indices.reversed()) {
             if (messages[i].role == "user" && messages[i].imageBase64 != null) {
                 messages[i].imageBase64 = null
-                println("[ConversationMemory] 已删除第 $i 条消息的图片")
+                Timber.d("已删除第 $i 条消息的图片")
                 break
             }
         }

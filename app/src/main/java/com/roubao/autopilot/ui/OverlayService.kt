@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.roubao.autopilot.MainActivity
 import com.roubao.autopilot.R
+import timber.log.Timber
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -96,7 +97,7 @@ class OverlayService : Service() {
         /** 显示人机协作模式 - 等待用户手动完成操作 */
         fun showTakeOver(message: String, onContinue: () -> Unit) {
             val action: () -> Unit = {
-                println("[OverlayService] showTakeOver: $message")
+                Timber.d("showTakeOver: $message")
                 continueCallback = onContinue
                 isTakeOverMode = true
                 isConfirmMode = false
@@ -108,7 +109,7 @@ class OverlayService : Service() {
                 action()
             } else {
                 // 悬浮窗尚未启动，加入等待队列
-                println("[OverlayService] showTakeOver: instance is null, queuing...")
+                Timber.d("showTakeOver: instance is null, queuing...")
                 pendingCallbacks.add(action)
             }
         }
@@ -116,7 +117,7 @@ class OverlayService : Service() {
         /** 显示敏感操作确认模式 - 用户确认或取消 */
         fun showConfirm(message: String, onConfirm: (Boolean) -> Unit) {
             val action: () -> Unit = {
-                println("[OverlayService] showConfirm: $message")
+                Timber.d("showConfirm: $message")
                 confirmCallback = onConfirm
                 isConfirmMode = true
                 isTakeOverMode = false
@@ -128,14 +129,14 @@ class OverlayService : Service() {
                 action()
             } else {
                 // 悬浮窗尚未启动，加入等待队列
-                println("[OverlayService] showConfirm: instance is null, queuing...")
+                Timber.d("showConfirm: instance is null, queuing...")
                 pendingCallbacks.add(action)
             }
         }
 
         /** 当 instance 可用时执行等待中的回调 */
         private fun processPendingCallbacks() {
-            println("[OverlayService] processPendingCallbacks: ${pendingCallbacks.size} pending")
+            Timber.d("processPendingCallbacks: ${pendingCallbacks.size} pending")
             pendingCallbacks.forEach { it.invoke() }
             pendingCallbacks.clear()
         }
@@ -155,7 +156,7 @@ class OverlayService : Service() {
         try {
             createOverlayView()
         } catch (e: Exception) {
-            println("[OverlayService] createOverlayView failed: ${e.message}")
+            Timber.e("createOverlayView failed: ${e.message}")
         }
 
         // 处理在 service 启动前排队的回调
@@ -198,7 +199,7 @@ class OverlayService : Service() {
 
             startForeground(1001, notification)
         } catch (e: Exception) {
-            println("[OverlayService] startForegroundNotification error: ${e.message}")
+            Timber.e("startForegroundNotification error: ${e.message}")
             // 降级：使用最简单的通知确保 startForeground 被调用
             try {
                 val fallbackNotification = NotificationCompat.Builder(this, channelId)
@@ -207,7 +208,7 @@ class OverlayService : Service() {
                     .build()
                 startForeground(1001, fallbackNotification)
             } catch (e2: Exception) {
-                println("[OverlayService] fallback startForeground also failed: ${e2.message}")
+                Timber.e("fallback startForeground also failed: ${e2.message}")
             }
         }
     }
@@ -465,7 +466,7 @@ class OverlayService : Service() {
 
     /** 切换到人机协作模式 */
     private fun setTakeOverMode(message: String) {
-        println("[OverlayService] setTakeOverMode: $message")
+        Timber.d("setTakeOverMode: $message")
         overlayView?.post {
             // 确保悬浮窗可见
             overlayView?.visibility = View.VISIBLE
@@ -480,7 +481,7 @@ class OverlayService : Service() {
 
     /** 切换到正常模式 */
     private fun setNormalMode() {
-        println("[OverlayService] setNormalMode")
+        Timber.d("setNormalMode")
         overlayView?.post {
             actionButton?.text = "⏹ 停止"
             actionButton?.setTextColor(Color.WHITE)
@@ -492,7 +493,7 @@ class OverlayService : Service() {
 
     /** 切换到敏感操作确认模式 */
     private fun setConfirmMode(message: String) {
-        println("[OverlayService] setConfirmMode: $message")
+        Timber.d("setConfirmMode: $message")
         overlayView?.post {
             // 确保悬浮窗可见
             overlayView?.visibility = View.VISIBLE

@@ -2,7 +2,6 @@ package com.roubao.autopilot
 
 import android.app.Application
 import android.content.pm.PackageManager
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.roubao.autopilot.controller.AppScanner
 import com.roubao.autopilot.controller.DeviceController
 import com.roubao.autopilot.data.SettingsManager
@@ -10,6 +9,7 @@ import com.roubao.autopilot.skills.SkillManager
 import com.roubao.autopilot.tools.ToolManager
 import com.roubao.autopilot.utils.CrashHandler
 import rikka.shizuku.Shizuku
+import timber.log.Timber
 
 class App : Application() {
 
@@ -24,23 +24,27 @@ class App : Application() {
         super.onCreate()
         instance = this
 
+        // 初始化 Timber 日志
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+
         // 初始化崩溃捕获（本地日志）
         CrashHandler.getInstance().init(this)
 
         // 初始化设置管理器（全局唯一实例）
         settingsManager = SettingsManager(this)
 
-        // 初始化 Firebase Crashlytics（根据用户设置决定是否启用）
+        // 初始化 Sentry（根据用户设置决定是否启用）
+        // 用户需在 AndroidManifest.xml 或此处设置自己的 DSN 以启用云端上报
         val cloudCrashReportEnabled = settingsManager.settings.value.cloudCrashReportEnabled
-        FirebaseCrashlytics.getInstance().apply {
-            setCrashlyticsCollectionEnabled(cloudCrashReportEnabled)
-            setCustomKey("app_version", BuildConfig.VERSION_NAME)
-            setCustomKey("device_model", android.os.Build.MODEL)
-            setCustomKey("android_version", android.os.Build.VERSION.SDK_INT.toString())
-            // 发送待上传的崩溃报告
-            sendUnsentReports()
+        io.sentry.android.core.SentryAndroid.init(this) { options ->
+            options.dsn = "" // 留空 = 禁用，用户需配置自己的 Sentry DSN
+            options.isEnableAutoSessionTracking = true
+            options.tracesSampleRate = 0.2
+            options.isEnabled = cloudCrashReportEnabled
         }
-        println("[App] 云端崩溃上报: ${if (cloudCrashReportEnabled) "已开启" else "已关闭"}")
+        Timber.d("云端崩溃上报: ${if (cloudCrashReportEnabled) "已开启" else "已关闭"}")
 
         // 初始化 Shizuku
         Shizuku.addRequestPermissionResultListener(REQUEST_PERMISSION_RESULT_LISTENER)
@@ -61,17 +65,17 @@ class App : Application() {
         val toolManager = ToolManager.init(this, deviceController, appScanner, settingsManager)
 
         // 异步预扫描应用列表（避免 ANR）
-        println("[App] 开始异步扫描已安装应用...")
+        Timber.d("开始异步扫描已安装应用...")
         Thread {
             appScanner.refreshApps()
-            println("[App] 已扫描 ${appScanner.getApps().size} 个应用")
+            Timber.d("已扫描 %d 个应用", appScanner.getApps().size)
         }.start()
 
         // 初始化 Skills 层（传入 appScanner 用于检测已安装应用）
         val skillManager = SkillManager.init(this, toolManager, appScanner)
-        println("[App] SkillManager 已加载 ${skillManager.getAllSkills().size} 个 Skills")
+        Timber.d("SkillManager 已加载 %d 个 Skills", skillManager.getAllSkills().size)
 
-        println("[App] 组件初始化完成")
+        Timber.d("组件初始化完成")
     }
 
     override fun onTerminate() {
@@ -83,8 +87,8 @@ class App : Application() {
      * 动态更新云端崩溃上报开关
      */
     fun updateCloudCrashReportEnabled(enabled: Boolean) {
-        FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(enabled)
-        println("[App] 云端崩溃上报已${if (enabled) "开启" else "关闭"}")
+        // Sentry does not support runtime toggle; log the preference change
+        Timber.d("云端崩溃上报已${if (enabled) "开启" else "关闭"}")
     }
 
     companion object {
@@ -98,7 +102,7 @@ class App : Application() {
         private val REQUEST_PERMISSION_RESULT_LISTENER =
             Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
                 val granted = grantResult == PackageManager.PERMISSION_GRANTED
-                println("[Shizuku] Permission result: $granted")
+                Timber.d("Shizuku permission result: %s", granted)
             }
     }
 }

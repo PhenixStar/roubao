@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
+import timber.log.Timber
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -57,13 +58,13 @@ class DeviceController(private val context: Context? = null) {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             shellService = IShellService.Stub.asInterface(service)
             serviceBound = true
-            println("[DeviceController] ShellService connected")
+            Timber.d("ShellService connected")
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             shellService = null
             serviceBound = false
-            println("[DeviceController] ShellService disconnected")
+            Timber.d("ShellService disconnected")
         }
     }
 
@@ -72,7 +73,7 @@ class DeviceController(private val context: Context? = null) {
      */
     fun bindService() {
         if (!isShizukuAvailable()) {
-            println("[DeviceController] Shizuku not available")
+            Timber.w("Shizuku not available")
             return
         }
         try {
@@ -130,7 +131,7 @@ class DeviceController(private val context: Context? = null) {
         }
         return try {
             val uid = Shizuku.getUid()
-            println("[DeviceController] Shizuku UID: $uid")
+            Timber.d("Shizuku UID: $uid")
             when (uid) {
                 0 -> ShizukuPrivilegeLevel.ROOT
                 else -> ShizukuPrivilegeLevel.ADB
@@ -161,7 +162,7 @@ class DeviceController(private val context: Context? = null) {
 
             val completed = process.waitFor(10, TimeUnit.SECONDS)
             if (!completed) {
-                println("[DeviceController] WARNING: execLocal timed out after 10s, destroying process")
+                Timber.w("execLocal timed out after 10s, destroying process")
                 process.destroyForcibly()
             }
             errorDrainer.join(1000)
@@ -183,12 +184,12 @@ class DeviceController(private val context: Context? = null) {
             if (service != null) {
                 service.exec(command)
             } else {
-                println("[DeviceController] WARNING: Shizuku unavailable, falling back to local shell (reduced privileges)")
+                Timber.w("Shizuku unavailable, falling back to local shell (reduced privileges)")
                 execLocal(command)
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            println("[DeviceController] WARNING: Shizuku unavailable, falling back to local shell (reduced privileges)")
+            Timber.w("Shizuku unavailable, falling back to local shell (reduced privileges)")
             execLocal(command)
         }
     }
@@ -243,7 +244,7 @@ class DeviceController(private val context: Context? = null) {
      * 使用 Android ClipboardManager API 设置剪贴板，然后发送粘贴按键
      */
     private fun typeViaClipboard(text: String) {
-        println("[DeviceController] 尝试输入中文: $text")
+        Timber.d("尝试输入中文: $text")
 
         // 方法1: 使用 Android 剪贴板 API + 粘贴 (最可靠，不需要额外 App)
         if (clipboardManager != null) {
@@ -258,9 +259,9 @@ class DeviceController(private val context: Context? = null) {
                         val clip = ClipData.newPlainText("baozi_input", text)
                         clipboardManager?.setPrimaryClip(clip)
                         clipboardSet = true
-                        println("[DeviceController] ✅ 已设置剪贴板: $text")
+                        Timber.d("已设置剪贴板: $text")
                     } catch (e: Exception) {
-                        println("[DeviceController] ❌ 设置剪贴板异常: ${e.message}")
+                        Timber.e("设置剪贴板异常: ${e.message}")
                     } finally {
                         latch.countDown()
                     }
@@ -269,12 +270,12 @@ class DeviceController(private val context: Context? = null) {
                 // 等待剪贴板设置完成 (最多等 1 秒)
                 val success = latch.await(1, TimeUnit.SECONDS)
                 if (!success) {
-                    println("[DeviceController] ❌ 等待剪贴板超时")
+                    Timber.e("等待剪贴板超时")
                     return
                 }
 
                 if (!clipboardSet) {
-                    println("[DeviceController] ❌ 剪贴板设置失败")
+                    Timber.e("剪贴板设置失败")
                     return
                 }
 
@@ -283,14 +284,14 @@ class DeviceController(private val context: Context? = null) {
 
                 // 发送粘贴按键 (KEYCODE_PASTE = 279)
                 exec("input keyevent 279")
-                println("[DeviceController] ✅ 已发送粘贴按键")
+                Timber.d("已发送粘贴按键")
                 return
             } catch (e: Exception) {
-                println("[DeviceController] ❌ 剪贴板方式失败: ${e.message}")
+                Timber.e("剪贴板方式失败: ${e.message}")
                 e.printStackTrace()
             }
         } else {
-            println("[DeviceController] ❌ ClipboardManager 为 null，Context 未设置")
+            Timber.e("ClipboardManager 为 null，Context 未设置")
         }
 
         // 方法2: 使用 ADB Keyboard 广播 (备选，需要安装 ADBKeyboard)
@@ -301,16 +302,16 @@ class DeviceController(private val context: Context? = null) {
             .replace("\$", "\\$")
             .replace("`", "\\`")
         val adbKeyboardResult = exec("am broadcast -a ADB_INPUT_TEXT --es msg \"$escaped\"")
-        println("[DeviceController] ADBKeyboard 广播结果: $adbKeyboardResult")
+        Timber.d("ADBKeyboard 广播结果: $adbKeyboardResult")
 
         if (adbKeyboardResult.contains("result=0")) {
-            println("[DeviceController] ✅ ADBKeyboard 输入成功")
+            Timber.d("ADBKeyboard 输入成功")
             return
         }
 
         // 方法3: 使用 cmd input text (Android 12+ 可能支持 UTF-8)
         // Use single-quote escaping to prevent shell injection
-        println("[DeviceController] 尝试 cmd input text...")
+        Timber.d("尝试 cmd input text...")
         val singleQuoteEscaped = text.replace("'", "'\\''")
         exec("cmd input text '$singleQuoteEscaped'")
     }
@@ -397,14 +398,14 @@ class DeviceController(private val context: Context? = null) {
 
             // 检查是否截图失败（敏感页面保护）
             if (output.contains("Status: -1") || output.contains("Failed") || output.contains("error")) {
-                println("[DeviceController] Screenshot blocked (sensitive screen), returning fallback")
+                Timber.w("Screenshot blocked (sensitive screen), returning fallback")
                 return@withContext createFallbackScreenshot(isSensitive = true)
             }
 
             // 尝试直接读取
             val file = File(SCREENSHOT_PATH)
             if (file.exists() && file.canRead() && file.length() > 0) {
-                println("[DeviceController] Reading screenshot from: $SCREENSHOT_PATH, size: ${file.length()}")
+                Timber.d("Reading screenshot from: $SCREENSHOT_PATH, size: ${file.length()}")
                 val bitmap = BitmapFactory.decodeFile(SCREENSHOT_PATH)
                 if (bitmap != null) {
                     return@withContext ScreenshotResult(bitmap)
@@ -414,17 +415,17 @@ class DeviceController(private val context: Context? = null) {
             // 如果无法直接读取，通过 shell cat 读取二进制数据
             // Only attempt su -c if root mode is available
             if (getShizukuPrivilegeLevel() == ShizukuPrivilegeLevel.ROOT) {
-                println("[DeviceController] Cannot read directly, trying su -c cat (root available)...")
+                Timber.d("Cannot read directly, trying su -c cat (root available)...")
                 var suProcess: Process? = null
                 try {
                     suProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
                     val bytes = suProcess.inputStream.readBytes()
                     val completed = suProcess.waitFor(5, TimeUnit.SECONDS)
                     if (!completed) {
-                        println("[DeviceController] WARNING: su -c cat timed out, destroying process")
+                        Timber.w("su -c cat timed out, destroying process")
                         suProcess.destroyForcibly()
                     } else if (bytes.isNotEmpty()) {
-                        println("[DeviceController] Read ${bytes.size} bytes via shell")
+                        Timber.d("Read ${bytes.size} bytes via shell")
                         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         if (bitmap != null) {
                             return@withContext ScreenshotResult(bitmap)
@@ -434,14 +435,14 @@ class DeviceController(private val context: Context? = null) {
                     suProcess?.destroy()
                 }
             } else {
-                println("[DeviceController] Cannot read directly, root not available for su -c fallback")
+                Timber.w("Cannot read directly, root not available for su -c fallback")
             }
 
-            println("[DeviceController] Screenshot file empty or not accessible, returning fallback")
+            Timber.w("Screenshot file empty or not accessible, returning fallback")
             createFallbackScreenshot(isSensitive = false)
         } catch (e: Exception) {
             e.printStackTrace()
-            println("[DeviceController] Screenshot exception, returning fallback")
+            Timber.e("Screenshot exception, returning fallback")
             createFallbackScreenshot(isSensitive = false)
         }
     }
@@ -473,34 +474,34 @@ class DeviceController(private val context: Context? = null) {
             // 尝试直接读取
             val file = File(SCREENSHOT_PATH)
             if (file.exists() && file.canRead() && file.length() > 0) {
-                println("[DeviceController] Reading screenshot from: $SCREENSHOT_PATH, size: ${file.length()}")
+                Timber.d("Reading screenshot from: $SCREENSHOT_PATH, size: ${file.length()}")
                 return@withContext BitmapFactory.decodeFile(SCREENSHOT_PATH)
             }
 
             // 如果无法直接读取，通过 shell cat 读取二进制数据
             // Only attempt su -c if root mode is available
             if (getShizukuPrivilegeLevel() == ShizukuPrivilegeLevel.ROOT) {
-                println("[DeviceController] Cannot read directly, trying su -c cat (root available)...")
+                Timber.d("Cannot read directly, trying su -c cat (root available)...")
                 var suProcess: Process? = null
                 try {
                     suProcess = Runtime.getRuntime().exec(arrayOf("su", "-c", "cat $SCREENSHOT_PATH"))
                     val bytes = suProcess.inputStream.readBytes()
                     val completed = suProcess.waitFor(5, TimeUnit.SECONDS)
                     if (!completed) {
-                        println("[DeviceController] WARNING: su -c cat timed out, destroying process")
+                        Timber.w("su -c cat timed out, destroying process")
                         suProcess.destroyForcibly()
                     } else if (bytes.isNotEmpty()) {
-                        println("[DeviceController] Read ${bytes.size} bytes via shell")
+                        Timber.d("Read ${bytes.size} bytes via shell")
                         return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     }
                 } finally {
                     suProcess?.destroy()
                 }
             } else {
-                println("[DeviceController] Cannot read directly, root not available for su -c fallback")
+                Timber.w("Cannot read directly, root not available for su -c fallback")
             }
 
-            println("[DeviceController] Screenshot file empty or not accessible")
+            Timber.w("Screenshot file empty or not accessible")
             null
         } catch (e: Exception) {
             e.printStackTrace()
@@ -523,10 +524,10 @@ class DeviceController(private val context: Context? = null) {
             val ctx = context
             if (ctx != null) {
                 val dm = ctx.resources.displayMetrics
-                println("[DeviceController] WARNING: wm size parse failed, using DisplayMetrics (${dm.widthPixels}x${dm.heightPixels})")
+                Timber.w("wm size parse failed, using DisplayMetrics (${dm.widthPixels}x${dm.heightPixels})")
                 Pair(dm.widthPixels, dm.heightPixels)
             } else {
-                println("[DeviceController] WARNING: wm size parse failed, using hardcoded 1080x2400 fallback")
+                Timber.w("wm size parse failed, using hardcoded 1080x2400 fallback")
                 Pair(1080, 2400)
             }
         }
@@ -598,24 +599,24 @@ class DeviceController(private val context: Context? = null) {
             val searchResults = appScanner.searchApps(appNameOrPackage, topK = 1)
             if (searchResults.isNotEmpty()) {
                 finalPackage = searchResults[0].app.packageName
-                println("[DeviceController] AppScanner found: ${searchResults[0].app.appName} -> $finalPackage")
+                Timber.d("AppScanner found: ${searchResults[0].app.appName} -> $finalPackage")
             } else {
                 // 找不到，直接用原始输入尝试
                 finalPackage = appNameOrPackage
-                println("[DeviceController] App not found in AppScanner: $appNameOrPackage")
+                Timber.w("App not found in AppScanner: $appNameOrPackage")
             }
         }
 
         // Validate package name to prevent command injection
         val packageNamePattern = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
         if (!packageNamePattern.matches(finalPackage)) {
-            println("[DeviceController] ERROR: Invalid package name rejected: $finalPackage")
+            Timber.e("Invalid package name rejected: $finalPackage")
             return
         }
 
         // 使用 monkey 命令启动应用 (最可靠)
         val result = exec("monkey -p $finalPackage -c android.intent.category.LAUNCHER 1 2>/dev/null")
-        println("[DeviceController] openApp: $appNameOrPackage -> $finalPackage, result: $result")
+        Timber.d("openApp: $appNameOrPackage -> $finalPackage, result: $result")
     }
 
     /**

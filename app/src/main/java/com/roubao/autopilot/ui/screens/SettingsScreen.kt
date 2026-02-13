@@ -39,7 +39,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.roubao.autopilot.BuildConfig
 import com.roubao.autopilot.data.ApiProvider
 import com.roubao.autopilot.data.AppSettings

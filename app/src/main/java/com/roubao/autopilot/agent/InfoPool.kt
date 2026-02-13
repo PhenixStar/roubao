@@ -1,6 +1,7 @@
 package com.roubao.autopilot.agent
 
 import org.json.JSONObject
+import timber.log.Timber
 
 /**
  * Agent 状态池 - 保存所有执行过程中的信息
@@ -182,7 +183,7 @@ data class Action(
                     status = arguments.optString("status", null)
                 )
             } catch (e: Exception) {
-                println("[Action] MAI-UI 格式解析失败: ${e.message}")
+                Timber.e("MAI-UI 格式解析失败: ${e.message}")
                 null
             }
         }

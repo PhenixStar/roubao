@@ -8,6 +8,7 @@ import java.io.File
 import java.io.FileWriter
 import java.io.PrintWriter
 import java.text.SimpleDateFormat
+import timber.log.Timber
 import java.util.*
 
 /**
@@ -201,7 +202,7 @@ class CrashHandler private constructor() : Thread.UncaughtExceptionHandler {
                 throwable.printStackTrace(writer)
             }
 
-            println("[CrashHandler] 崩溃日志已保存: $fileName")
+            Timber.e("崩溃日志已保存: $fileName")
         } catch (e: Exception) {
             e.printStackTrace()
         }

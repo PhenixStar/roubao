@@ -39,6 +39,7 @@ import com.roubao.autopilot.vlm.MAIUIClient
 import com.roubao.autopilot.vlm.VLMClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import rikka.shizuku.Shizuku
 import android.util.Log
 
@@ -563,7 +564,7 @@ class MainActivity : ComponentActivity() {
                     val steps = agentState?.executionSteps ?: emptyList()
                     val currentLogs = mobileAgent.value?.logs?.value ?: emptyList()
 
-                    println("[MainActivity] 取消任务 - steps: ${steps.size}, logs: ${currentLogs.size}")
+                    Timber.d("取消任务 - steps: ${steps.size}, logs: ${currentLogs.size}")
 
                     val updatedRecord = record.copy(
                         endTime = System.currentTimeMillis(),

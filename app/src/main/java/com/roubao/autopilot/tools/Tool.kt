@@ -1,6 +1,7 @@
 package com.roubao.autopilot.tools
 
 import org.json.JSONObject
+import timber.log.Timber
 
 /**
  * Tool 执行结果
@@ -106,7 +107,7 @@ object ToolRegistry {
 
     fun register(tool: Tool) {
         tools[tool.name] = tool
-        println("[ToolRegistry] 注册工具: ${tool.name}")
+        Timber.d("注册工具: ${tool.name}")
     }
 
     fun get(name: String): Tool? = tools[name]

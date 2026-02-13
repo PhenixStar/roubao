@@ -12,6 +12,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -131,7 +132,7 @@ class GUIOwlClient(
                     .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                println("[$TAG] 请求: instruction=$instruction")
+                Timber.d("请求: instruction=$instruction")
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string() ?: ""
 
@@ -162,7 +163,7 @@ class GUIOwlClient(
                                         sessionId = sessionId,
                                         rawResponse = responseBody
                                     )
-                                    println("[$TAG] 响应: operation=${result.operation}")
+                                    Timber.d("响应: operation=${result.operation}")
                                     return@withContext Result.success(result)
                                 }
                             }
@@ -172,7 +173,7 @@ class GUIOwlClient(
                     } else if (response.code == 429) {
                         val retryAfter = response.header("Retry-After")?.toLongOrNull()
                         val waitMs = if (retryAfter != null) retryAfter * 1000 else RETRY_DELAY_MS * attempt * 2
-                        println("[$TAG] Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
+                        Timber.w("Rate limited (429), waiting ${waitMs}ms before retry $attempt/$MAX_RETRIES...")
                         lastException = Exception("Rate limited (HTTP 429)")
                         delay(waitMs)
                     } else {
@@ -180,7 +181,7 @@ class GUIOwlClient(
                     }
                 }
             } catch (e: Exception) {
-                println("[$TAG] 请求失败 (attempt $attempt): ${e.message}")
+                Timber.w("请求失败 (attempt $attempt): ${e.message}")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
@@ -272,7 +273,7 @@ class GUIOwlClient(
             return ParsedAction(type = "finish")
         }
 
-        println("[$TAG] 无法解析操作: $operation")
+        Timber.w("无法解析操作: $operation")
         return null
     }
 
@@ -295,7 +296,7 @@ class GUIOwlClient(
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
         val bytes = outputStream.toByteArray()
-        println("[$TAG] 图片压缩: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
+        Timber.d("图片压缩: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
         val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         return "data:image/jpeg;base64,$base64"
     }

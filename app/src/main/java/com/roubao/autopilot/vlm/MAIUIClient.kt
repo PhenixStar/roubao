@@ -12,6 +12,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
@@ -142,7 +143,7 @@ For each function call, return the thinking process in <thinking> </thinking> ta
                             val message = choices.getJSONObject(0).getJSONObject("message")
                             val content = message.getString("content")
 
-                            println("[MAIUIClient] Raw response: $content")
+                            Timber.d("Raw response: $content")
 
                             // 解析响应
                             val parsed = parseResponse(content)
@@ -166,7 +167,7 @@ For each function call, return the thinking process in <thinking> </thinking> ta
                     }
                 }
             } catch (e: Exception) {
-                println("[MAIUIClient] Error on attempt $attempt: ${e.message}")
+                Timber.w("Error on attempt $attempt: ${e.message}")
                 lastException = e
                 if (attempt < MAX_RETRIES) {
                     delay(RETRY_DELAY_MS * attempt)
@@ -278,7 +279,7 @@ For each function call, return the thinking process in <thinking> </thinking> ta
                     action = parseAction(arguments)
                 }
             } catch (e: Exception) {
-                println("[MAIUIClient] Failed to parse tool_call: ${e.message}")
+                Timber.e("Failed to parse tool_call: ${e.message}")
             }
         }
 
@@ -337,7 +338,7 @@ For each function call, return the thinking process in <thinking> </thinking> ta
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
         val bytes = outputStream.toByteArray()
-        println("[MAIUIClient] Image compressed: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
+        Timber.d("Image compressed: ${bitmap.width}x${bitmap.height}, ${bytes.size / 1024}KB")
         return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
