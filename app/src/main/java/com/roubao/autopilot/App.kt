@@ -17,6 +17,8 @@ class App : Application() {
         private set
     lateinit var appScanner: AppScanner
         private set
+    lateinit var settingsManager: SettingsManager
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -25,8 +27,10 @@ class App : Application() {
         // 初始化崩溃捕获（本地日志）
         CrashHandler.getInstance().init(this)
 
+        // 初始化设置管理器（全局唯一实例）
+        settingsManager = SettingsManager(this)
+
         // 初始化 Firebase Crashlytics（根据用户设置决定是否启用）
-        val settingsManager = SettingsManager(this)
         val cloudCrashReportEnabled = settingsManager.settings.value.cloudCrashReportEnabled
         FirebaseCrashlytics.getInstance().apply {
             setCrashlyticsCollectionEnabled(cloudCrashReportEnabled)
@@ -54,7 +58,7 @@ class App : Application() {
         appScanner = AppScanner(this)
 
         // 初始化 Tools 层
-        val toolManager = ToolManager.init(this, deviceController, appScanner)
+        val toolManager = ToolManager.init(this, deviceController, appScanner, settingsManager)
 
         // 异步预扫描应用列表（避免 ANR）
         println("[App] 开始异步扫描已安装应用...")

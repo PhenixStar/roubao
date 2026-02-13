@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
 
         deviceController = DeviceController(this)
         deviceController.setCacheDir(cacheDir)
-        settingsManager = SettingsManager(this)
+        settingsManager = App.getInstance().settingsManager
         executionRepository = ExecutionRepository(this)
 
         // 加载执行记录

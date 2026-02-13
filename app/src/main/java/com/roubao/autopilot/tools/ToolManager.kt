@@ -14,7 +14,8 @@ import com.roubao.autopilot.data.SettingsManager
 class ToolManager private constructor(
     private val context: Context,
     private val deviceController: DeviceController,
-    private val appScanner: AppScanner
+    private val appScanner: AppScanner,
+    private val settingsManager: SettingsManager
 ) {
 
     // 持有各个工具的引用（方便直接调用）
@@ -40,7 +41,7 @@ class ToolManager private constructor(
         openAppTool = OpenAppTool(deviceController, appScanner)
         clipboardTool = ClipboardTool(context)
         deepLinkTool = DeepLinkTool(deviceController)
-        shellTool = ShellTool(deviceController, SettingsManager(context))
+        shellTool = ShellTool(deviceController, settingsManager)
         httpTool = HttpTool()
 
         // 注册到全局 Registry
@@ -85,10 +86,11 @@ class ToolManager private constructor(
         fun init(
             context: Context,
             deviceController: DeviceController,
-            appScanner: AppScanner
+            appScanner: AppScanner,
+            settingsManager: SettingsManager
         ): ToolManager {
             return instance ?: synchronized(this) {
-                instance ?: ToolManager(context, deviceController, appScanner).also {
+                instance ?: ToolManager(context, deviceController, appScanner, settingsManager).also {
                     it.initialize()
                     instance = it
                 }
